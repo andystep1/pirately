@@ -2,6 +2,7 @@ import { Header } from "@/components";
 import { UseSettingsReturn } from "@/types";
 import { Providers } from "./Providers";
 import { CustomProviders } from "./CustomProvider";
+import { ModelManager } from "../model-manager";
 
 export const STTProviders = (settings: UseSettingsReturn) => {
   return (
@@ -12,10 +13,11 @@ export const STTProviders = (settings: UseSettingsReturn) => {
         isMainTitle
       />
 
-      {/* Custom Provider */}
       <CustomProviders {...settings} />
-      {/* Providers Selection */}
       <Providers {...settings} />
+      <ModelManager
+        selectedSttProvider={settings.selectedSttProvider?.provider || ""}
+      />
     </div>
   );
 };

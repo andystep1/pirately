@@ -18,9 +18,15 @@ export const Providers = ({
       const provider = allSttProviders?.find(
         (p) => p?.id === selectedSttProvider?.provider
       );
-      if (provider) {
-        const json = curl2Json(provider?.curl);
-        setLocalSelectedProvider(json as ResultJSON);
+      if (provider?.curl) {
+        try {
+          const json = curl2Json(provider.curl);
+          setLocalSelectedProvider(json as ResultJSON);
+        } catch {
+          setLocalSelectedProvider(null);
+        }
+      } else {
+        setLocalSelectedProvider(null);
       }
     }
   }, [selectedSttProvider?.provider]);
@@ -49,10 +55,16 @@ export const Providers = ({
         <Selection
           selected={selectedSttProvider?.provider}
           options={allSttProviders?.map((provider) => {
-            const json = curl2Json(provider?.curl);
+            let url = provider?.id || "Custom Provider";
+            if (provider?.curl) {
+              try {
+                const json = curl2Json(provider.curl);
+                url = json?.url || url;
+              } catch {}
+            }
             return {
               label: provider?.isCustom
-                ? json?.url || "Custom Provider"
+                ? url
                 : provider?.id || "Custom Provider",
               value: provider?.id || "Custom Provider",
               isCustom: provider?.isCustom,

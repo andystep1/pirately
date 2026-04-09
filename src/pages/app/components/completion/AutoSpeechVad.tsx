@@ -7,6 +7,9 @@ import { Button } from "@/components";
 import { useApp } from "@/contexts";
 import { floatArrayToWav } from "@/lib/utils";
 import { shouldUsePluelyAPI } from "@/lib/functions/pluely.api";
+import { invoke } from "@tauri-apps/api/core";
+
+const IN_PROCESS_STT_ID = "in-process";
 
 interface AutoSpeechVADProps {
   submit: UseCompletionReturn["submit"];
@@ -56,13 +59,46 @@ const AutoSpeechVADInternal = ({
           (p) => p.id === selectedSttProvider.provider
         );
 
-        if (!providerConfig && !usePluelyAPI) {
+        if (!providerConfig && !usePluelyAPI && selectedSttProvider.provider !== IN_PROCESS_STT_ID) {
           console.warn("Selected speech provider configuration not found");
           setState((prev: any) => ({
             ...prev,
             error:
               "Speech provider configuration not found. Please check your settings.",
           }));
+          return;
+        }
+
+        if (selectedSttProvider.provider === IN_PROCESS_STT_ID) {
+          try {
+            setIsTranscribing(true);
+            const audioBlob = floatArrayToWav(audio, 16000, "wav");
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => {
+                const dataUrl = reader.result as string;
+                resolve(dataUrl.split(",")[1] || "");
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(audioBlob);
+            });
+
+            const text = await invoke<string>("transcribe_local", {
+              audioBase64: base64,
+            });
+
+            if (text && text.trim()) {
+              submit(text.trim());
+            }
+          } catch (err) {
+            console.error("Local transcription failed:", err);
+            setState((prev: any) => ({
+              ...prev,
+              error: `Local transcription failed: ${err instanceof Error ? err.message : String(err)}`,
+            }));
+          } finally {
+            setIsTranscribing(false);
+          }
           return;
         }
 

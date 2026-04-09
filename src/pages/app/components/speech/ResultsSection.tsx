@@ -1,165 +1,208 @@
+import { LiveChunk } from "@/hooks/useSystemAudio";
 import { ChatConversation } from "@/types";
-import { Markdown, Switch, CopyButton } from "@/components";
-import { BotIcon, HeadphonesIcon, Loader2, SparklesIcon } from "lucide-react";
+import { Markdown, CopyButton } from "@/components";
+import { BotIcon, Loader2, HeadphonesIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useEffect, useState, useRef } from "react";
 
 type Props = {
   lastTranscription: string;
   lastAIResponse: string;
   isAIProcessing: boolean;
+  isProcessing: boolean;
   conversation: ChatConversation;
-  conversationMode: boolean;
-  setConversationMode: (mode: boolean) => void;
+  liveChunks: LiveChunk[];
+  sentBoundary: number;
 };
+
+function TypingText({ text, speed = 25 }: { text: string; speed?: number }) {
+  const [displayed, setDisplayed] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const indexRef = useRef(0);
+
+  useEffect(() => {
+    if (indexRef.current >= text.length) {
+      setDisplayed(text);
+      setIsTyping(false);
+      return;
+    }
+
+    setIsTyping(true);
+    const startIdx = indexRef.current;
+    let i = startIdx;
+
+    const interval = setInterval(() => {
+      i++;
+      setDisplayed(text.slice(0, i));
+      indexRef.current = i;
+      if (i >= text.length) {
+        clearInterval(interval);
+        setIsTyping(false);
+      }
+    }, speed);
+
+    return () => clearInterval(interval);
+  }, [text, speed]);
+
+  return (
+    <span>
+      {displayed}
+      {isTyping && (
+        <span className="inline-block w-1.5 h-3 bg-primary animate-pulse ml-0.5 align-middle" />
+      )}
+    </span>
+  );
+}
 
 export const ResultsSection = ({
   lastTranscription,
   lastAIResponse,
   isAIProcessing,
+  isProcessing,
   conversation,
-  conversationMode,
-  setConversationMode,
+  liveChunks,
+  sentBoundary,
 }: Props) => {
   const hasResponse = lastAIResponse || isAIProcessing;
+  const hasLiveChunks = liveChunks.length > 0;
   const hasHistory = conversation.messages.length > 2;
 
-  if (!hasResponse && !lastTranscription) {
+  if (!hasResponse && !lastTranscription && !hasLiveChunks) {
     return null;
   }
 
-  const isMac = navigator.platform.toLowerCase().includes("mac");
-  const modKey = isMac ? "⌘" : "Ctrl";
+  const transcriptText =
+    liveChunks.length > 0
+      ? liveChunks.map((c) => c.text).join(" ")
+      : lastTranscription;
+
+  const latestChunkId = liveChunks.length > 0 ? liveChunks[liveChunks.length - 1].id : -1;
 
   return (
     <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
-      {/* Header with toggle */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <SparklesIcon className="w-3.5 h-3.5 text-primary" />
-          <h4 className="text-xs font-medium">
-            {conversationMode ? "Conversation" : "AI Response"}
-          </h4>
+          <HeadphonesIcon className="w-3.5 h-3.5 text-primary" />
+          <h4 className="text-xs font-medium">Live Session</h4>
+          {isProcessing && !isAIProcessing && (
+            <span className="text-[9px] text-muted-foreground animate-pulse ml-1">
+              listening...
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2 select-none">
-          <span className="text-[9px] text-muted-foreground/50 bg-muted/50 px-1 rounded">
-            {modKey}+K
-          </span>
-          <Switch
-            checked={conversationMode}
-            onCheckedChange={setConversationMode}
-            className="scale-75"
-          />
-          {lastAIResponse && <CopyButton content={lastAIResponse} />}
-        </div>
+        {lastAIResponse && <CopyButton content={lastAIResponse} />}
       </div>
 
-      {/* RESPONSE MODE: System as text, then AI response */}
-      {!conversationMode && (
-        <div className="space-y-2">
-          {/* System Input - Just text with bold label */}
-          {lastTranscription && (
-            <p className="text-[11px] text-muted-foreground">
-              <span className="font-semibold">System:</span> {lastTranscription}
-            </p>
-          )}
+      <div className="flex gap-3 min-h-0">
+        <div className="flex-1 min-w-0 space-y-1.5">
+          <div className="flex items-center gap-1 mb-1">
+            <HeadphonesIcon className="h-2.5 w-2.5 text-primary" />
+            <span className="text-[9px] font-medium text-primary uppercase tracking-wide">
+              Transcript
+            </span>
+            {isProcessing && (
+              <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
+            )}
+          </div>
 
-          {/* AI Response */}
-          {hasResponse && (
-            <div>
-              {isAIProcessing && !lastAIResponse ? (
-                <div className="flex items-center gap-2 py-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span className="text-xs text-muted-foreground">
-                    Generating response...
-                  </span>
-                </div>
-              ) : (
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <Markdown>{lastAIResponse}</Markdown>
-                  {isAIProcessing && (
-                    <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+          <div className="space-y-0.5 text-[11px] leading-relaxed max-h-60 overflow-y-auto">
+            {liveChunks.length > 0 ? (
+              liveChunks.map((chunk, idx) => {
+                const isSent = chunk.id < sentBoundary;
+                const isLatest = chunk.id === latestChunkId;
 
-      {/* CONVERSATION MODE: AI on top, then System, then history */}
-      {conversationMode && (
-        <div className="space-y-2">
-          {/* AI Response - First (on top) */}
-          {hasResponse && (
-            <div className="rounded-md bg-background/50 p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <BotIcon className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide">
-                  AI
-                </span>
-              </div>
-              {isAIProcessing && !lastAIResponse ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                  <span className="text-[10px] text-muted-foreground">
-                    Generating...
-                  </span>
-                </div>
-              ) : (
-                <div className="prose prose-sm max-w-none dark:prose-invert text-sm">
-                  <Markdown>{lastAIResponse}</Markdown>
-                  {isAIProcessing && (
-                    <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* System Input - Second */}
-          {lastTranscription && (
-            <div className="rounded-md border-l-2 border-primary/50 bg-primary/5 p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <HeadphonesIcon className="h-3 w-3 text-primary" />
-                <span className="text-[9px] font-medium text-primary uppercase tracking-wide">
-                  System
-                </span>
-              </div>
-              <p className="text-sm">{lastTranscription}</p>
-            </div>
-          )}
-
-          {/* Previous Messages */}
-          {hasHistory && (
-            <div className="space-y-2 pt-2 border-t border-border/50">
-              <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
-                Previous
-              </p>
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {conversation.messages
-                  .slice(2)
-                  .sort((a, b) => b.timestamp - a.timestamp)
-                  .map((message, index) => (
-                    <div
-                      key={message.id || index}
+                return (
+                  <span key={chunk.id}>
+                    {idx > 0 && " "}
+                    <span
                       className={cn(
-                        "p-2 rounded-md text-[11px]",
-                        message.role === "user"
-                          ? "bg-primary/5 border-l-2 border-primary/30"
-                          : "bg-background/50"
+                        isSent && "bg-primary/10 rounded px-0.5",
+                        isLatest && !isSent && "text-foreground font-medium"
                       )}
                     >
-                      <span className="text-[8px] font-medium text-muted-foreground uppercase">
-                        {message.role === "user" ? "System" : "AI"}
-                      </span>
-                      <div className="text-muted-foreground leading-relaxed mt-0.5">
-                        <Markdown>{message.content}</Markdown>
-                      </div>
-                    </div>
-                  ))}
-              </div>
+                      {isLatest && !isSent ? (
+                        <TypingText text={chunk.text} speed={20} />
+                      ) : (
+                        chunk.text
+                      )}
+                    </span>
+                  </span>
+                );
+              })
+            ) : (
+              transcriptText && (
+                <span className="text-muted-foreground">{transcriptText}</span>
+              )
+            )}
+
+            {isProcessing && liveChunks.length === 0 && (
+              <span className="text-muted-foreground/50 italic">
+                Waiting for speech...
+              </span>
+            )}
+          </div>
+        </div>
+
+        {(hasResponse || liveChunks.some((c) => c.finalized)) && (
+          <div className="w-px bg-border/50 flex-shrink-0" />
+        )}
+
+        {(hasResponse || liveChunks.some((c) => c.finalized)) && (
+          <div className="flex-1 min-w-0 space-y-1.5">
+            <div className="flex items-center gap-1 mb-1">
+              <BotIcon className="h-2.5 w-2.5 text-muted-foreground" />
+              <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide">
+                AI
+              </span>
             </div>
-          )}
+
+            {isAIProcessing && !lastAIResponse ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                <span className="text-[10px] text-muted-foreground">
+                  Generating...
+                </span>
+              </div>
+            ) : lastAIResponse ? (
+              <div className="prose prose-sm max-w-none dark:prose-invert text-[11px] max-h-60 overflow-y-auto">
+                <Markdown>{lastAIResponse}</Markdown>
+                {isAIProcessing && (
+                  <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {hasHistory && (
+        <div className="border-t border-border/50 pt-2 space-y-1">
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
+            Previous
+          </p>
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {conversation.messages
+              .slice(2)
+              .sort((a, b) => b.timestamp - a.timestamp)
+              .map((message, index) => (
+                <div
+                  key={message.id || index}
+                  className={cn(
+                    "p-1.5 rounded-md text-[10px]",
+                    message.role === "user"
+                      ? "bg-primary/5 border-l-2 border-primary/30"
+                      : "bg-background/50"
+                  )}
+                >
+                  <span className="text-[8px] font-medium text-muted-foreground uppercase">
+                    {message.role === "user" ? "System" : "AI"}
+                  </span>
+                  <div className="text-muted-foreground leading-relaxed mt-0.5">
+                    <Markdown>{message.content}</Markdown>
+                  </div>
+                </div>
+              ))}
+          </div>
         </div>
       )}
     </div>

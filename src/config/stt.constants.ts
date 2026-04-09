@@ -1,5 +1,12 @@
 export const SPEECH_TO_TEXT_PROVIDERS = [
   {
+    id: "in-process",
+    name: "In-Process (Local Model)",
+    curl: "",
+    responseContentPath: "text",
+    streaming: false,
+  },
+  {
     id: "openai-whisper",
     name: "OpenAI Whisper",
     curl: `curl -X POST "https://api.openai.com/v1/audio/transcriptions" \\
@@ -73,26 +80,6 @@ export const SPEECH_TO_TEXT_PROVIDERS = [
     streaming: false,
   },
   {
-    id: "speechmatics-stt",
-    name: "Speechmatics",
-    curl: `curl -X POST "https://asr.api.speechmatics.com/v2/jobs" \\
-      -H "Authorization: Bearer {{API_KEY}}" \\
-      -F "data_file={{AUDIO}}" \\
-      -F 'config={"type": "transcription", "transcription_config": {"language": "en"}}'`,
-    responseContentPath: "job.id",
-    streaming: false,
-  },
-  {
-    id: "rev-ai-stt",
-    name: "Rev.ai Speech-to-Text",
-    curl: `curl -X POST "https://api.rev.ai/speechtotext/v1/jobs" \\
-      -H "Authorization: Bearer {{API_KEY}}" \\
-      -F "media={{AUDIO}}" \\
-      -F "options={{OPTIONS}}"`,
-    responseContentPath: "id",
-    streaming: false,
-  },
-  {
     id: "ibm-watson-stt",
     name: "IBM Watson Speech-to-Text",
     curl: `curl -X POST "https://api.us-south.speech-to-text.watson.cloud.ibm.com/v1/recognize" \\
@@ -100,6 +87,16 @@ export const SPEECH_TO_TEXT_PROVIDERS = [
       -H "Content-Type: audio/wav" \\
       --data-binary {{AUDIO}}`,
     responseContentPath: "results[0].alternatives[0].transcript",
+    streaming: false,
+  },
+  {
+    id: "local-whisper",
+    name: "Local Whisper Server",
+    curl: `curl -X POST "http://localhost:8080/v1/audio/transcriptions" \\
+      -F "file={{AUDIO}}" \\
+      -F "model=whisper-1" \\
+      -F "response_format=json"`,
+    responseContentPath: "text",
     streaming: false,
   },
 ];

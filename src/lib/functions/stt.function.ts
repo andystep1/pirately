@@ -64,6 +64,8 @@ export async function fetchSTT(params: STTParams): Promise<string> {
     if (!selectedProvider) throw new Error("Selected provider not provided");
     if (!audio) throw new Error("Audio file is required");
 
+    if (!provider.curl) throw new Error("In-process STT does not use HTTP. Use the speech-transcribed event instead.");
+
     let curlJson: any;
     try {
       curlJson = curl2Json(provider.curl);

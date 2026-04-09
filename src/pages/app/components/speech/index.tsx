@@ -63,37 +63,18 @@ export const SystemAudio = (props: useSystemAudioType) => {
     startContinuousRecording,
     ignoreContinuousRecording,
     scrollAreaRef,
+    liveChunks,
+    sentBoundary,
   } = props;
 
-  const { hasActiveLicense, supportsImages } = useApp();
+  const { supportsImages } = useApp();
 
-  // View mode toggle
-  const [conversationMode, setConversationMode] = useState(false);
-
-  // Screenshot state
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
   const isVadMode = vadConfig.enabled;
   const hasResponse = lastAIResponse || isAIProcessing;
 
-  // Keyboard shortcut for Cmd+K to toggle view mode
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isPopoverOpen) return;
-
-      // Cmd+K or Ctrl+K to toggle view mode
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setConversationMode((prev) => !prev);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPopoverOpen]);
-
-  // Reset screenshot when processing starts (message is being sent)
   useEffect(() => {
     if (isProcessing && screenshotImage) {
       setScreenshotImage(null);
@@ -226,7 +207,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                 {/* Action Buttons */}
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   {/* Screenshot Button */}
-                  {hasActiveLicense && !setupRequired && supportsImages && (
+                  {!setupRequired && supportsImages && (
                     <Button
                       size="sm"
                       variant={screenshotImage ? "default" : "outline"}
@@ -352,9 +333,10 @@ export const SystemAudio = (props: useSystemAudioType) => {
                       lastTranscription={lastTranscription}
                       lastAIResponse={lastAIResponse}
                       isAIProcessing={isAIProcessing}
+                      isProcessing={isProcessing}
                       conversation={conversation}
-                      conversationMode={conversationMode}
-                      setConversationMode={setConversationMode}
+                      liveChunks={liveChunks}
+                      sentBoundary={sentBoundary}
                     />
 
                     {/* Settings Panel */}

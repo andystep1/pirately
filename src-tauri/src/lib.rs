@@ -1,10 +1,13 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod activate;
 mod api;
+mod audio;
 mod capture;
 mod db;
 mod shortcuts;
+mod transcription;
 mod window;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_posthog::{init as posthog_init, PostHogConfig, PostHogOptions};
@@ -12,16 +15,21 @@ use tokio::task::JoinHandle;
 mod speaker;
 use capture::CaptureState;
 use speaker::VadConfig;
+use transcription::TranscriptionManager;
+use transcription::ModelManager;
 
 #[cfg(target_os = "macos")]
 #[allow(deprecated)]
 use tauri_nspanel::{cocoa::appkit::NSWindowCollectionBehavior, panel_delegate, WebviewWindowExt};
 
-#[derive(Default)]
 pub struct AudioState {
     stream_task: Arc<Mutex<Option<JoinHandle<()>>>>,
     vad_config: Arc<Mutex<VadConfig>>,
     is_capturing: Arc<Mutex<bool>>,
+    use_local_stt: Arc<AtomicBool>,
+    selected_local_model: Arc<Mutex<Option<String>>>,
+    transcription_manager: Arc<TranscriptionManager>,
+    model_manager: Arc<ModelManager>,
 }
 
 #[tauri::command]
@@ -39,7 +47,6 @@ pub fn run() {
                 .add_migrations("sqlite:pluely.db", db::migrations())
                 .build(),
         )
-        .manage(AudioState::default())
         .manage(CaptureState::default())
         .manage(shortcuts::WindowVisibility {
             is_hidden: Mutex::new(false),
@@ -115,8 +122,36 @@ pub fn run() {
             speaker::get_audio_sample_rate,
             speaker::get_input_devices,
             speaker::get_output_devices,
+            transcription::model_manager::list_available_models,
+            transcription::model_manager::download_model,
+            transcription::model_manager::delete_model,
+            transcription::model_manager::cancel_model_download,
+            speaker::set_stt_mode,
+            speaker::set_local_model,
+            speaker::transcribe_local,
         ])
         .setup(|app| {
+            let app_data_dir = app.handle().path().app_data_dir()
+                .expect("Failed to get app data dir");
+            let model_manager = Arc::new(
+                ModelManager::new(app_data_dir.join("models"))
+                    .expect("Failed to init model manager")
+            );
+            let transcription_manager = Arc::new(
+                TranscriptionManager::new(model_manager.clone())
+            );
+let audio_state = AudioState {
+                stream_task: Arc::new(Mutex::new(None)),
+                vad_config: Arc::new(Mutex::new(VadConfig::default())),
+                is_capturing: Arc::new(Mutex::new(false)),
+                use_local_stt: Arc::new(AtomicBool::new(false)),
+                selected_local_model: Arc::new(Mutex::new(None)),
+                transcription_manager,
+                model_manager: model_manager.clone(),
+            };
+            app.manage(audio_state);
+            app.manage(model_manager);
+
             // Setup main window positioning
             window::setup_main_window(app).expect("Failed to setup main window");
             #[cfg(target_os = "macos")]

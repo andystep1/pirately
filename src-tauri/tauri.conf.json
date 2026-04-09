@@ -30,7 +30,9 @@
         "shadow": false
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
@@ -43,15 +45,25 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["info.plist", "pluely.desktop"],
-    "macOS": { "minimumSystemVersion": "10.13" }
+    "resources": [
+      "info.plist",
+      "pluely.desktop",
+      "resources/models/*"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.13"
+    }
   },
   "plugins": {
     "sql": {
-      "preload": ["sqlite:pluely.db"]
+      "preload": [
+        "sqlite:pluely.db"
+      ]
     },
     "updater": {
-      "endpoints": ["https://pluely.com/api/update"],
+      "endpoints": [
+        "https://pluely.com/api/update"
+      ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2RDJBNUFFM0ZCREEyQjEKUldTeG9yMC9ycVhTWmlBRkovV2N5L3RudDhTTHFzM3QxSkF0R0doRGtvSUJKWktpdGp4cWRhcmcK",
       "windows": {
         "installMode": "passive"

@@ -37,13 +37,13 @@ export interface VadConfig {
 const DEFAULT_VAD_CONFIG: VadConfig = {
   enabled: true,
   hop_size: 1024,
-  sensitivity_rms: 0.012, // Much less sensitive - only real speech
-  peak_threshold: 0.035, // Higher threshold - filters clicks/noise
-  silence_chunks: 45, // ~1.0s of required silence
-  min_speech_chunks: 7, // ~0.16s - captures short answers
-  pre_speech_chunks: 12, // ~0.27s - enough to catch word start
-  noise_gate_threshold: 0.003, // Stronger noise filtering
-  max_recording_duration_secs: 180, // 3 minutes default
+  sensitivity_rms: 0.025,
+  peak_threshold: 0.06,
+  silence_chunks: 60,
+  min_speech_chunks: 10,
+  pre_speech_chunks: 15,
+  noise_gate_threshold: 0.008,
+  max_recording_duration_secs: 180,
 };
 
 // Chat message interface (reusing from useCompletion)
@@ -61,6 +61,12 @@ export interface ChatConversation {
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;
+}
+
+export interface LiveChunk {
+  id: number;
+  text: string;
+  finalized: boolean;
 }
 
 export type useSystemAudioType = ReturnType<typeof useSystemAudio>;
@@ -81,10 +87,15 @@ export function useSystemAudio() {
     useState<boolean>(false);
   const [showQuickActions, setShowQuickActions] = useState<boolean>(true);
   const [vadConfig, setVadConfig] = useState<VadConfig>(DEFAULT_VAD_CONFIG);
-  const [recordingProgress, setRecordingProgress] = useState<number>(0); // For continuous mode
+  const [recordingProgress, setRecordingProgress] = useState<number>(0);
   const [isContinuousMode, setIsContinuousMode] = useState<boolean>(false);
   const [isRecordingInContinuousMode, setIsRecordingInContinuousMode] =
     useState<boolean>(false);
+  const [liveChunks, setLiveChunks] = useState<LiveChunk[]>([]);
+  const [cumulativeSpeechSecs, setCumulativeSpeechSecs] = useState<number>(0);
+  const [sentBoundary, setSentBoundary] = useState<number>(0);
+  const liveChunksRef = useRef<LiveChunk[]>([]);
+  const cumulativeSpeechRef = useRef<number>(0);
 
   const [conversation, setConversation] = useState<ChatConversation>({
     id: "",
@@ -110,6 +121,7 @@ export function useSystemAudio() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const processWithAIRef = useRef<((transcription: string, prompt: string, prev: Message[]) => Promise<void>) | null>(null);
 
   // Load context settings and VAD config from localStorage on mount
   useEffect(() => {
@@ -216,90 +228,170 @@ export function useSystemAudio() {
     };
   }, []);
 
-  // Handle single speech detection event (both VAD and continuous modes)
   useEffect(() => {
-    let speechUnlisten: (() => void) | undefined;
+    let liveUnlisten: (() => void) | undefined;
+    let speechStartUnlisten: (() => void) | undefined;
 
     const setupEventListener = async () => {
       try {
-        speechUnlisten = await listen("speech-detected", async (event) => {
+        const isInProcess = selectedSttProvider?.provider === "in-process";
+
+        if (!isInProcess) {
+          liveUnlisten = await listen("speech-detected", async (event) => {
+            try {
+              if (!capturing) return;
+
+              const base64Audio = event.payload as string;
+              const binaryString = atob(base64Audio);
+              const bytes = new Uint8Array(binaryString.length);
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+              const audioBlob = new Blob([bytes], { type: "audio/wav" });
+
+              const usePluelyAPI = await shouldUsePluelyAPI();
+              if (!selectedSttProvider.provider && !usePluelyAPI) {
+                setError("No speech provider selected.");
+                return;
+              }
+
+              const providerConfig = allSttProviders.find(
+                (p) => p.id === selectedSttProvider.provider
+              );
+
+              if (!providerConfig && !usePluelyAPI) {
+                setError("Speech provider config not found.");
+                return;
+              }
+
+              setIsProcessing(true);
+
+              const sttPromise = fetchSTT({
+                provider: providerConfig,
+                selectedProvider: selectedSttProvider,
+                audio: audioBlob,
+              });
+
+              const timeoutPromise = new Promise<string>((_, reject) => {
+                setTimeout(
+                  () => reject(new Error("Speech transcription timed out (30s)")),
+                  30000
+                );
+              });
+
+              try {
+                const transcription = await Promise.race([
+                  sttPromise,
+                  timeoutPromise,
+                ]);
+
+                if (transcription.trim()) {
+                  setLastTranscription(transcription);
+                  setError("");
+
+                  const effectiveSystemPrompt = useSystemPrompt
+                    ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+                    : contextContent || DEFAULT_SYSTEM_PROMPT;
+
+                  const previousMessages = conversation.messages.map((msg) => {
+                    return { role: msg.role, content: msg.content };
+                  });
+
+                  await processWithAI(
+                    transcription,
+                    effectiveSystemPrompt,
+                    previousMessages
+                  );
+                } else {
+                  setError("Received empty transcription");
+                }
+              } catch (sttError: any) {
+                console.error("STT Error:", sttError);
+                setError(sttError.message || "Failed to transcribe audio");
+                setIsPopoverOpen(true);
+              }
+            } catch (err) {
+              setError("Failed to process speech");
+            } finally {
+              setIsProcessing(false);
+            }
+          });
+          return;
+        }
+
+        speechStartUnlisten = await listen("speech-start", () => {
+          setIsProcessing(true);
+        });
+
+        liveUnlisten = await listen("live-transcription", async (event) => {
           try {
             if (!capturing) return;
 
-            const base64Audio = event.payload as string;
-            // Convert to blob
-            const binaryString = atob(base64Audio);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-            }
-            const audioBlob = new Blob([bytes], { type: "audio/wav" });
+            const { text, is_final, speech_duration_secs } = event.payload as {
+              text: string;
+              is_final: boolean;
+              speech_duration_secs: number;
+            };
 
-            const usePluelyAPI = await shouldUsePluelyAPI();
-            if (!selectedSttProvider.provider && !usePluelyAPI) {
-              setError("No speech provider selected.");
-              return;
-            }
+            if (!text || text.trim().length === 0) return;
 
-            const providerConfig = allSttProviders.find(
-              (p) => p.id === selectedSttProvider.provider
+            const chunkId = liveChunksRef.current.length;
+            const newChunk: LiveChunk = {
+              id: chunkId,
+              text: text.trim(),
+              finalized: false,
+            };
+
+            liveChunksRef.current = [...liveChunksRef.current, newChunk];
+            setLiveChunks([...liveChunksRef.current]);
+
+            const newCumulative = cumulativeSpeechRef.current + speech_duration_secs;
+            cumulativeSpeechRef.current = newCumulative;
+            setCumulativeSpeechSecs(newCumulative);
+
+            setLastTranscription(
+              liveChunksRef.current.map((c) => c.text).join(" ")
             );
+            setError("");
 
-            if (!providerConfig && !usePluelyAPI) {
-              setError("Speech provider config not found.");
-              return;
-            }
+            if (is_final && newCumulative >= 5) {
+              const fullTranscript = liveChunksRef.current
+                .map((c) => c.text)
+                .join(" ");
 
-            setIsProcessing(true);
+              liveChunksRef.current = liveChunksRef.current.map((c) => ({
+                ...c,
+                finalized: true,
+              }));
+              setLiveChunks([...liveChunksRef.current]);
+              setSentBoundary(chunkId + 1);
 
-            // Add timeout wrapper for STT request (30 seconds)
-            const sttPromise = fetchSTT({
-              provider: providerConfig,
-              selectedProvider: selectedSttProvider,
-              audio: audioBlob,
-            });
+              cumulativeSpeechRef.current = 0;
+              setCumulativeSpeechSecs(0);
 
-            const timeoutPromise = new Promise<string>((_, reject) => {
-              setTimeout(
-                () => reject(new Error("Speech transcription timed out (30s)")),
-                30000
+              const effectiveSystemPrompt = useSystemPrompt
+                ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+                : contextContent || DEFAULT_SYSTEM_PROMPT;
+
+              const previousMessages = conversation.messages.map((msg) => {
+                return { role: msg.role, content: msg.content };
+              });
+
+              setIsProcessing(true);
+              await processWithAIRef.current?.(
+                fullTranscript,
+                effectiveSystemPrompt,
+                previousMessages
               );
-            });
 
-            try {
-              const transcription = await Promise.race([
-                sttPromise,
-                timeoutPromise,
-              ]);
-
-              if (transcription.trim()) {
-                setLastTranscription(transcription);
-                setError("");
-
-                const effectiveSystemPrompt = useSystemPrompt
-                  ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-                  : contextContent || DEFAULT_SYSTEM_PROMPT;
-
-                const previousMessages = conversation.messages.map((msg) => {
-                  return { role: msg.role, content: msg.content };
-                });
-
-                await processWithAI(
-                  transcription,
-                  effectiveSystemPrompt,
-                  previousMessages
-                );
-              } else {
-                setError("Received empty transcription");
-              }
-            } catch (sttError: any) {
-              console.error("STT Error:", sttError);
-              setError(sttError.message || "Failed to transcribe audio");
-              setIsPopoverOpen(true);
+              liveChunksRef.current = [];
+              setLiveChunks([]);
+              setIsProcessing(false);
+            } else {
+              setIsProcessing(true);
             }
           } catch (err) {
             setError("Failed to process speech");
-          } finally {
             setIsProcessing(false);
           }
         });
@@ -311,13 +403,17 @@ export function useSystemAudio() {
     setupEventListener();
 
     return () => {
-      if (speechUnlisten) speechUnlisten();
+      if (liveUnlisten) liveUnlisten();
+      if (speechStartUnlisten) speechStartUnlisten();
     };
   }, [
     capturing,
     selectedSttProvider,
     allSttProviders,
     conversation.messages.length,
+    useSystemPrompt,
+    systemPrompt,
+    contextContent,
   ]);
 
   // Context management functions
@@ -550,6 +646,10 @@ export function useSystemAudio() {
     [selectedAIProvider, allAiProviders, conversation.messages]
   );
 
+  useEffect(() => {
+    processWithAIRef.current = processWithAI;
+  }, [processWithAI]);
+
   const startCapture = useCallback(async () => {
     try {
       setError("");
@@ -627,6 +727,11 @@ export function useSystemAudio() {
       setLastAIResponse("");
       setError("");
       setIsPopoverOpen(false);
+      setLiveChunks([]);
+      setCumulativeSpeechSecs(0);
+      setSentBoundary(0);
+      liveChunksRef.current = [];
+      cumulativeSpeechRef.current = 0;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       setError(`Failed to stop capture: ${errorMessage}`);
@@ -779,6 +884,11 @@ export function useSystemAudio() {
     setIsAIProcessing(false);
     setIsPopoverOpen(false);
     setUseSystemPrompt(true);
+    setLiveChunks([]);
+    setCumulativeSpeechSecs(0);
+    setSentBoundary(0);
+    liveChunksRef.current = [];
+    cumulativeSpeechRef.current = 0;
   }, []);
 
   // Update VAD configuration
@@ -922,6 +1032,10 @@ export function useSystemAudio() {
     manualStopAndSend,
     startContinuousRecording,
     ignoreContinuousRecording,
+    // Live transcript
+    liveChunks,
+    cumulativeSpeechSecs,
+    sentBoundary,
     // Scroll area ref for keyboard navigation
     scrollAreaRef,
   };
