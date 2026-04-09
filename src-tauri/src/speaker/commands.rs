@@ -128,7 +128,33 @@ pub async fn start_system_audio_capture(
             .unwrap_or_else(|| "parakeet-tdt-0.6b-v3".to_string());
 
         if let Err(e) = transcription_manager.ensure_model_loaded(&model_id) {
-            tracing::warn!("Failed to load local model '{}': {}. Falling back to remote STT.", model_id, e);
+            tracing::info!("Model '{}' not loaded ({}), attempting auto-download...", model_id, e);
+            let mm = state.model_manager.clone();
+            let mid = model_id.clone();
+            let app_dl = app.clone();
+            
+            let _ = app_clone.emit("live-transcription", serde_json::json!({
+                "text": "Downloading transcription model (first time only)...",
+                "is_final": false,
+                "speech_duration_secs": 0.0,
+            }));
+            
+            match mm.download_model(&mid, &app_dl).await {
+                Ok(()) => {
+                    tracing::info!("Auto-download of '{}' completed", mid);
+                    if let Err(e2) = transcription_manager.ensure_model_loaded(&mid) {
+                        tracing::warn!("Failed to load model after download: {}", e2);
+                    }
+                }
+                Err(dl_err) => {
+                    tracing::warn!("Auto-download failed: {}", dl_err);
+                    let _ = app_clone.emit("live-transcription", serde_json::json!({
+                        "text": format!("Failed to download model: {}. Go to Dev Space > Model Manager to download manually.", dl_err),
+                        "is_final": true,
+                        "speech_duration_secs": 0.0,
+                    }));
+                }
+            }
         }
     }
 

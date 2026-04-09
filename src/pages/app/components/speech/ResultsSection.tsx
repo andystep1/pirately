@@ -3,19 +3,21 @@ import { ChatConversation } from "@/types";
 import { Markdown, CopyButton } from "@/components";
 import { BotIcon, Loader2, HeadphonesIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, RefObject } from "react";
 
 type Props = {
   lastTranscription: string;
   lastAIResponse: string;
   isAIProcessing: boolean;
   isProcessing: boolean;
+  capturing: boolean;
   conversation: ChatConversation;
   liveChunks: LiveChunk[];
   sentBoundary: number;
+  scrollAreaRef: RefObject<HTMLDivElement | null>;
 };
 
-function TypingText({ text, speed = 25 }: { text: string; speed?: number }) {
+function TypingText({ text, speed = 20 }: { text: string; speed?: number }) {
   const [displayed, setDisplayed] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const indexRef = useRef(0);
@@ -28,8 +30,7 @@ function TypingText({ text, speed = 25 }: { text: string; speed?: number }) {
     }
 
     setIsTyping(true);
-    const startIdx = indexRef.current;
-    let i = startIdx;
+    let i = indexRef.current;
 
     const interval = setInterval(() => {
       i++;
@@ -59,55 +60,55 @@ export const ResultsSection = ({
   lastAIResponse,
   isAIProcessing,
   isProcessing,
+  capturing,
   conversation,
   liveChunks,
   sentBoundary,
+  scrollAreaRef,
 }: Props) => {
   const hasResponse = lastAIResponse || isAIProcessing;
   const hasLiveChunks = liveChunks.length > 0;
   const hasHistory = conversation.messages.length > 2;
-
-  if (!hasResponse && !lastTranscription && !hasLiveChunks) {
-    return null;
-  }
-
-  const transcriptText =
-    liveChunks.length > 0
-      ? liveChunks.map((c) => c.text).join(" ")
-      : lastTranscription;
-
+  const showRightPane = hasResponse || liveChunks.some((c) => c.finalized);
   const latestChunkId = liveChunks.length > 0 ? liveChunks[liveChunks.length - 1].id : -1;
 
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const aiEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [liveChunks.length]);
+
+  useEffect(() => {
+    aiEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lastAIResponse]);
+
+  const isEmpty = !hasResponse && !lastTranscription && !hasLiveChunks && !capturing;
+  if (isEmpty) return null;
+
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <HeadphonesIcon className="w-3.5 h-3.5 text-primary" />
-          <h4 className="text-xs font-medium">Live Session</h4>
-          {isProcessing && !isAIProcessing && (
-            <span className="text-[9px] text-muted-foreground animate-pulse ml-1">
-              listening...
+    <div className="flex h-full" ref={scrollAreaRef}>
+      {/* Left: Transcript */}
+      <div className={cn("flex flex-col min-h-0", showRightPane ? "w-1/2" : "w-full")}>
+        <div className="flex-shrink-0 px-3 py-1.5 border-b border-border/30 flex items-center gap-1.5">
+          <HeadphonesIcon className="h-3 w-3 text-primary" />
+          <span className="text-[10px] font-medium text-primary uppercase tracking-wide">
+            Transcript
+          </span>
+          {isProcessing && (
+            <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
+          )}
+          {capturing && !isProcessing && (
+            <span className="text-[9px] text-muted-foreground animate-pulse">
+              listening
             </span>
           )}
         </div>
-        {lastAIResponse && <CopyButton content={lastAIResponse} />}
-      </div>
 
-      <div className="flex gap-3 min-h-0">
-        <div className="flex-1 min-w-0 space-y-1.5">
-          <div className="flex items-center gap-1 mb-1">
-            <HeadphonesIcon className="h-2.5 w-2.5 text-primary" />
-            <span className="text-[9px] font-medium text-primary uppercase tracking-wide">
-              Transcript
-            </span>
-            {isProcessing && (
-              <Loader2 className="h-2.5 w-2.5 animate-spin text-muted-foreground" />
-            )}
-          </div>
-
-          <div className="space-y-0.5 text-[11px] leading-relaxed max-h-60 overflow-y-auto">
-            {liveChunks.length > 0 ? (
-              liveChunks.map((chunk, idx) => {
+        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+          {liveChunks.length > 0 ? (
+            <>
+              {liveChunks.map((chunk, idx) => {
                 const isSent = chunk.id < sentBoundary;
                 const isLatest = chunk.id === latestChunkId;
 
@@ -116,92 +117,96 @@ export const ResultsSection = ({
                     {idx > 0 && " "}
                     <span
                       className={cn(
-                        isSent && "bg-primary/10 rounded px-0.5",
+                        "text-[11px] leading-relaxed",
+                        isSent && "bg-primary/10 rounded px-0.5 text-muted-foreground",
                         isLatest && !isSent && "text-foreground font-medium"
                       )}
                     >
                       {isLatest && !isSent ? (
-                        <TypingText text={chunk.text} speed={20} />
+                        <TypingText text={chunk.text} />
                       ) : (
                         chunk.text
                       )}
                     </span>
                   </span>
                 );
-              })
-            ) : (
-              transcriptText && (
-                <span className="text-muted-foreground">{transcriptText}</span>
-              )
-            )}
+              })}
+              <div ref={transcriptEndRef} />
+            </>
+          ) : lastTranscription ? (
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {lastTranscription}
+            </p>
+          ) : capturing ? (
+            <p className="text-[11px] text-muted-foreground/50 italic animate-pulse">
+              Waiting for speech...
+            </p>
+          ) : null}
 
-            {isProcessing && liveChunks.length === 0 && (
-              <span className="text-muted-foreground/50 italic">
-                Waiting for speech...
-              </span>
-            )}
-          </div>
+          {hasHistory && (
+            <div className="border-t border-border/30 pt-2 mt-2 space-y-1">
+              <p className="text-[9px] text-muted-foreground/60 uppercase tracking-wide">
+                Previous
+              </p>
+              {conversation.messages
+                .slice(2)
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .map((message, index) => (
+                  <div
+                    key={message.id || index}
+                    className={cn(
+                      "p-1.5 rounded-md text-[10px]",
+                      message.role === "user"
+                        ? "bg-primary/5 border-l-2 border-primary/30"
+                        : "bg-background/50"
+                    )}
+                  >
+                    <span className="text-[8px] font-medium text-muted-foreground uppercase">
+                      {message.role === "user" ? "System" : "AI"}
+                    </span>
+                    <div className="text-muted-foreground leading-relaxed mt-0.5 line-clamp-2">
+                      {message.content}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
+      </div>
 
-        {(hasResponse || liveChunks.some((c) => c.finalized)) && (
-          <div className="w-px bg-border/50 flex-shrink-0" />
-        )}
+      {/* Divider */}
+      {showRightPane && <div className="w-px bg-border/50 flex-shrink-0" />}
 
-        {(hasResponse || liveChunks.some((c) => c.finalized)) && (
-          <div className="flex-1 min-w-0 space-y-1.5">
-            <div className="flex items-center gap-1 mb-1">
-              <BotIcon className="h-2.5 w-2.5 text-muted-foreground" />
-              <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide">
+      {/* Right: AI Response */}
+      {showRightPane && (
+        <div className="flex flex-col min-h-0 w-1/2">
+          <div className="flex-shrink-0 px-3 py-1.5 border-b border-border/30 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <BotIcon className="h-3 w-3 text-muted-foreground" />
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                 AI
               </span>
             </div>
+            {lastAIResponse && <CopyButton content={lastAIResponse} />}
+          </div>
 
+          <div className="flex-1 overflow-y-auto p-3">
             {isAIProcessing && !lastAIResponse ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                <span className="text-[10px] text-muted-foreground">
+              <div className="flex items-center gap-2 py-4 justify-center">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span className="text-xs text-muted-foreground">
                   Generating...
                 </span>
               </div>
             ) : lastAIResponse ? (
-              <div className="prose prose-sm max-w-none dark:prose-invert text-[11px] max-h-60 overflow-y-auto">
+              <div className="prose prose-sm max-w-none dark:prose-invert text-[11px]">
                 <Markdown>{lastAIResponse}</Markdown>
                 {isAIProcessing && (
                   <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
                 )}
+                <div ref={aiEndRef} />
               </div>
             ) : null}
-          </div>
-        )}
-      </div>
-
-      {hasHistory && (
-        <div className="border-t border-border/50 pt-2 space-y-1">
-          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
-            Previous
-          </p>
-          <div className="space-y-1 max-h-32 overflow-y-auto">
-            {conversation.messages
-              .slice(2)
-              .sort((a, b) => b.timestamp - a.timestamp)
-              .map((message, index) => (
-                <div
-                  key={message.id || index}
-                  className={cn(
-                    "p-1.5 rounded-md text-[10px]",
-                    message.role === "user"
-                      ? "bg-primary/5 border-l-2 border-primary/30"
-                      : "bg-background/50"
-                  )}
-                >
-                  <span className="text-[8px] font-medium text-muted-foreground uppercase">
-                    {message.role === "user" ? "System" : "AI"}
-                  </span>
-                  <div className="text-muted-foreground leading-relaxed mt-0.5">
-                    <Markdown>{message.content}</Markdown>
-                  </div>
-                </div>
-              ))}
           </div>
         </div>
       )}

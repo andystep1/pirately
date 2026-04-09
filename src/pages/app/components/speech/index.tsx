@@ -4,7 +4,6 @@ import {
   Popover,
   PopoverTrigger,
   PopoverContent,
-  ScrollArea,
 } from "@/components";
 import {
   HeadphonesIcon,
@@ -12,17 +11,15 @@ import {
   LoaderIcon,
   AudioLinesIcon,
   CameraIcon,
-  PlusIcon,
   XIcon,
+  SettingsIcon,
+  PlusIcon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { ModeSwitcher } from "./ModeSwitcher";
-import { RecordingPanel } from "./RecordingPanel";
 import { ResultsSection } from "./ResultsSection";
 import { SettingsPanel } from "./SettingsPanel";
 import { PermissionFlow } from "./PermissionFlow";
 import { QuickActions } from "./QuickActions";
-import { Warning } from "./Warning";
 import { useSystemAudioType } from "@/hooks";
 import { useApp } from "@/contexts";
 import { cn } from "@/lib/utils";
@@ -55,13 +52,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
     showQuickActions,
     setShowQuickActions,
     handleQuickActionClick,
-    vadConfig,
-    updateVadConfiguration,
-    isRecordingInContinuousMode,
-    recordingProgress,
-    manualStopAndSend,
-    startContinuousRecording,
-    ignoreContinuousRecording,
     scrollAreaRef,
     liveChunks,
     sentBoundary,
@@ -71,8 +61,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const isVadMode = vadConfig.enabled;
   const hasResponse = lastAIResponse || isAIProcessing;
 
   useEffect(() => {
@@ -89,20 +79,11 @@ export const SystemAudio = (props: useSystemAudioType) => {
     }
   };
 
-  const handleModeChange = (vadEnabled: boolean) => {
-    updateVadConfiguration({
-      ...vadConfig,
-      enabled: vadEnabled,
-    });
-  };
-
-  // Capture screenshot functionality
   const handleCaptureScreenshot = useCallback(async () => {
     if (isCapturingScreenshot) return;
 
     setIsCapturingScreenshot(true);
     try {
-      // Check screen recording permission on macOS
       const platform = navigator.platform.toLowerCase();
       if (platform.includes("mac")) {
         const {
@@ -118,9 +99,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
         }
       }
 
-      // Capture screenshot
       const base64: string = await invoke("capture_screenshot", {
-        screenId: null, // Use default screen
+        screenId: null,
       });
 
       setScreenshotImage(base64);
@@ -185,190 +165,195 @@ export const SystemAudio = (props: useSystemAudioType) => {
           sideOffset={8}
         >
           <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
-            {/* Header - Mode Switcher + Actions */}
-            <div className="flex-shrink-0 p-3 border-b border-border/50">
-              <div className="flex items-center justify-between gap-2">
-                {/* Mode Switcher */}
-                {!setupRequired && (
-                  <ModeSwitcher
-                    isVadMode={isVadMode}
-                    onModeChange={handleModeChange}
-                    disabled={
-                      isRecordingInContinuousMode ||
-                      isProcessing ||
-                      isAIProcessing
-                    }
-                  />
+            {/* Header */}
+            <div className="flex-shrink-0 px-3 py-2 border-b border-border/50 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {capturing && (
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <span className="text-xs font-medium">Live</span>
+                  </span>
                 )}
                 {setupRequired && (
                   <h2 className="font-semibold text-sm">Setup Required</h2>
                 )}
+                {error && !setupRequired && (
+                  <span className="text-[10px] text-red-600 truncate max-w-[200px]">
+                    {error}
+                  </span>
+                )}
+              </div>
 
-                {/* Action Buttons */}
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {/* Screenshot Button */}
-                  {!setupRequired && supportsImages && (
-                    <Button
-                      size="sm"
-                      variant={screenshotImage ? "default" : "outline"}
-                      onClick={handleCaptureScreenshot}
-                      disabled={isCapturingScreenshot}
-                      className={cn(
-                        "h-6 text-[10px] gap-1 px-2",
-                        screenshotImage && "bg-primary text-primary-foreground"
-                      )}
-                      title="Capture screenshot to include with transcription"
-                    >
-                      {isCapturingScreenshot ? (
-                        <LoaderIcon className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <CameraIcon className="w-3 h-3" />
-                      )}
-                      Screenshot
-                    </Button>
-                  )}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {/* Screenshot */}
+                {!setupRequired && supportsImages && (
+                  <Button
+                    size="icon"
+                    variant={screenshotImage ? "default" : "ghost"}
+                    onClick={handleCaptureScreenshot}
+                    disabled={isCapturingScreenshot}
+                    className="h-6 w-6"
+                    title="Attach screenshot"
+                  >
+                    {isCapturingScreenshot ? (
+                      <LoaderIcon className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <CameraIcon className="w-3 h-3" />
+                    )}
+                  </Button>
+                )}
 
-                  {/* New Conversation Button */}
-                  {!setupRequired && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={startNewConversation}
-                      className="h-6 text-[10px] gap-1 px-2"
-                      title="Start a new conversation"
-                    >
-                      <PlusIcon className="w-3 h-3" />
-                      New
-                    </Button>
-                  )}
+                {/* New */}
+                {!setupRequired && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={startNewConversation}
+                    className="h-6 w-6"
+                    title="New session"
+                  >
+                    <PlusIcon className="w-3 h-3" />
+                  </Button>
+                )}
 
-                  {/* Close Button */}
-                  {!capturing && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-6 w-6"
-                      title="Close"
-                      onClick={() => {
-                        setIsPopoverOpen(false);
-                        resizeWindow(false);
-                      }}
-                    >
-                      <XIcon className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </div>
+                {/* Stop */}
+                {capturing && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={stopCapture}
+                    className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
+                    title="Stop capture"
+                  >
+                    <XIcon className="w-3 h-3" />
+                  </Button>
+                )}
+
+                {/* Close */}
+                {!capturing && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    title="Close"
+                    onClick={() => {
+                      setIsPopoverOpen(false);
+                      resizeWindow(false);
+                    }}
+                  >
+                    <XIcon className="w-3 h-3" />
+                  </Button>
+                )}
               </div>
             </div>
 
-            <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
-              <div className="p-2 space-y-2">
-                {/* Screenshot Preview */}
-                {screenshotImage && (
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/5 border border-primary/20">
-                    <img
-                      src={`data:image/png;base64,${screenshotImage}`}
-                      alt="Screenshot"
-                      className="h-12 w-20 object-cover rounded"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-medium">
-                        Screenshot attached
-                      </p>
-                      <p className="text-[9px] text-muted-foreground">
-                        Will be sent with next transcription
-                      </p>
-                    </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-5 w-5"
-                      onClick={handleRemoveScreenshot}
-                    >
-                      <XIcon className="h-3 w-3" />
-                    </Button>
-                  </div>
-                )}
+            {/* Screenshot preview strip */}
+            {screenshotImage && (
+              <div className="flex-shrink-0 px-3 py-1.5 border-b border-border/50 bg-muted/30 flex items-center gap-2">
+                <img
+                  src={`data:image/png;base64,${screenshotImage}`}
+                  alt="Screenshot"
+                  className="h-8 w-14 object-cover rounded"
+                />
+                <span className="text-[9px] text-muted-foreground">
+                  Screenshot attached
+                </span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-4 w-4 ml-auto"
+                  onClick={handleRemoveScreenshot}
+                >
+                  <XIcon className="h-2.5 w-2.5" />
+                </Button>
+              </div>
+            )}
 
-                {/* Error Display */}
-                {error && !setupRequired && (
-                  <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200">
-                    <AlertCircleIcon className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-[10px] font-medium text-red-800">
-                        Error
-                      </p>
-                      <p className="text-[10px] text-red-700">{error}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Setup Required - Permission Flow */}
-                {setupRequired ? (
+            {/* Main content */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {setupRequired ? (
+                <div className="p-3">
                   <PermissionFlow
                     onPermissionGranted={() => {
                       startCapture();
                     }}
-                    onPermissionDenied={() => {
-                      // Keep showing setup instructions
-                    }}
+                    onPermissionDenied={() => {}}
                   />
-                ) : (
-                  <>
-                    {/* Recording Panel */}
-                    <RecordingPanel
-                      isVadMode={isVadMode}
-                      isRecording={isRecordingInContinuousMode}
-                      isProcessing={isProcessing}
-                      isAIProcessing={isAIProcessing}
-                      recordingProgress={recordingProgress}
-                      maxDuration={vadConfig.max_recording_duration_secs}
-                      onStartRecording={startContinuousRecording}
-                      onStopAndSend={manualStopAndSend}
-                      onIgnore={ignoreContinuousRecording}
-                    />
-
-                    {/* AI Response */}
-                    <ResultsSection
-                      lastTranscription={lastTranscription}
-                      lastAIResponse={lastAIResponse}
-                      isAIProcessing={isAIProcessing}
-                      isProcessing={isProcessing}
-                      conversation={conversation}
-                      liveChunks={liveChunks}
-                      sentBoundary={sentBoundary}
-                    />
-
-                    {/* Settings Panel */}
-                    <SettingsPanel
-                      vadConfig={vadConfig}
-                      onUpdateVadConfig={updateVadConfiguration}
-                      useSystemPrompt={useSystemPrompt}
-                      setUseSystemPrompt={setUseSystemPrompt}
-                      contextContent={contextContent}
-                      setContextContent={setContextContent}
-                    />
-
-                    {/* Help/Keyboard Shortcuts */}
-                    <Warning isVadMode={isVadMode} />
-                  </>
-                )}
-              </div>
-            </ScrollArea>
-
-            {/* Quick Actions */}
-            {!setupRequired && hasResponse && (
-              <div className="flex-shrink-0 border-t border-border/50 p-2">
-                <QuickActions
-                  actions={quickActions}
-                  onActionClick={handleQuickActionClick}
-                  onAddAction={addQuickAction}
-                  onRemoveAction={removeQuickAction}
-                  isManaging={isManagingQuickActions}
-                  setIsManaging={setIsManagingQuickActions}
-                  show={showQuickActions}
-                  setShow={setShowQuickActions}
+                </div>
+              ) : (
+                <ResultsSection
+                  lastTranscription={lastTranscription}
+                  lastAIResponse={lastAIResponse}
+                  isAIProcessing={isAIProcessing}
+                  isProcessing={isProcessing}
+                  capturing={capturing}
+                  conversation={conversation}
+                  liveChunks={liveChunks}
+                  sentBoundary={sentBoundary}
+                  scrollAreaRef={scrollAreaRef}
                 />
+              )}
+            </div>
+
+            {/* Footer: Quick actions + Settings toggle */}
+            {!setupRequired && (
+              <div className="flex-shrink-0 border-t border-border/50">
+                {hasResponse && (
+                  <div className="px-2 pt-1.5 pb-1">
+                    <QuickActions
+                      actions={quickActions}
+                      onActionClick={handleQuickActionClick}
+                      onAddAction={addQuickAction}
+                      onRemoveAction={removeQuickAction}
+                      isManaging={isManagingQuickActions}
+                      setIsManaging={setIsManagingQuickActions}
+                      show={showQuickActions}
+                      setShow={setShowQuickActions}
+                    />
+                  </div>
+                )}
+
+                {/* Settings drawer */}
+                <div className="border-t border-border/50">
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(!showSettings)}
+                    className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <SettingsIcon className="w-3 h-3 text-muted-foreground" />
+                      <span className="text-[10px] text-muted-foreground">
+                        Settings
+                      </span>
+                    </div>
+                    <svg
+                      className={cn(
+                        "w-3 h-3 text-muted-foreground transition-transform",
+                        showSettings && "rotate-180"
+                      )}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </button>
+                  {showSettings && (
+                    <div className="px-3 pb-2">
+                      <SettingsPanel
+                        useSystemPrompt={useSystemPrompt}
+                        setUseSystemPrompt={setUseSystemPrompt}
+                        contextContent={contextContent}
+                        setContextContent={setContextContent}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

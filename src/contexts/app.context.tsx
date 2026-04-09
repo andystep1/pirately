@@ -115,7 +115,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     provider: string;
     variables: Record<string, string>;
   }>({
-    provider: "",
+    provider: "in-process",
     variables: {},
   });
 
@@ -210,7 +210,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       STORAGE_KEYS.SELECTED_STT_PROVIDER
     );
     if (savedSelectedStt) {
-      setSelectedSttProvider(JSON.parse(savedSelectedStt));
+      try {
+        const parsed = JSON.parse(savedSelectedStt);
+        if (parsed?.provider) {
+          setSelectedSttProvider(parsed);
+        }
+      } catch {}
     }
 
     // Load customizable state

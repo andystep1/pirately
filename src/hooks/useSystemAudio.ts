@@ -661,9 +661,6 @@ export function useSystemAudio() {
         return;
       }
 
-      const isContinuous = !vadConfig.enabled;
-
-      // Set up conversation
       const conversationId = generateConversationId("sysaudio");
       setConversation({
         id: conversationId,
@@ -675,17 +672,9 @@ export function useSystemAudio() {
 
       setCapturing(true);
       setIsPopoverOpen(true);
-      setIsContinuousMode(isContinuous);
+      setIsContinuousMode(false);
       setRecordingProgress(0);
 
-      // If continuous mode
-      if (isContinuous) {
-        setIsRecordingInContinuousMode(false);
-        return;
-      }
-
-      // VAD mode: Start recording immediately
-      // Stop any existing capture
       await invoke<string>("stop_system_audio_capture");
 
       const deviceId =
@@ -901,16 +890,6 @@ export function useSystemAudio() {
       console.error("Failed to update VAD config:", error);
     }
   }, []);
-
-  useEffect(() => {
-    if (capturing) {
-      setIsContinuousMode(!vadConfig.enabled);
-
-      if (!vadConfig.enabled) {
-        setIsRecordingInContinuousMode(false);
-      }
-    }
-  }, [vadConfig.enabled, capturing]);
 
   // Keyboard arrow key support for scrolling (local shortcut)
   useEffect(() => {
